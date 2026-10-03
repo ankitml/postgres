@@ -97,6 +97,12 @@ select true as "OK"
 select explain_filter_to_json('explain (settings, format json) select * from int8_tbl i8') #> '{0,Settings,plan_cache_mode}';
 rollback;
 
+-- BLOAT option
+select true as "OK"
+  from explain_filter('explain (bloat) select * from int8_tbl i8') ln
+  where ln = 'Bloat:';
+select explain_filter_to_json('explain (bloat, format json) select * from int8_tbl i8') #>> '{0,Bloat,0,Relation Name}';
+
 -- GENERIC_PLAN option
 
 select explain_filter('explain (generic_plan) select unique1 from tenk1 where thousand = $1');
