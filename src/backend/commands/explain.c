@@ -774,14 +774,11 @@ ExplainPrintBloat(ExplainState *es, Bitmapset *rels_used)
 	{
 		RangeTblEntry *rte;
 		PgStat_StatTabEntry *tabentry;
-		const char *relname;
-		const char *nspname;
-		char	   *qualified_relname;
+		char	   *relname;
+		char	   *nspname = NULL;
+		char	   *refname;
 		int64		livetuples = 0;
 		int64		deadtuples = 0;
-
-		if (rti == 0)
-			continue;
 
 		rte = rt_fetch(rti, es->rtable);
 		if (rte->rtekind != RTE_RELATION)
@@ -795,8 +792,9 @@ ExplainPrintBloat(ExplainState *es, Bitmapset *rels_used)
 		}
 
 		relname = get_rel_name(rte->relid);
-		nspname = get_namespace_name_or_temp(get_rel_namespace(rte->relid));
-		qualified_relname = quote_qualified_identifier(nspname, relname);
+		if (es->verbose || es->format != EXPLAIN_FORMAT_TEXT)
+			nspname = get_namespace_name_or_temp(get_rel_namespace(rte->relid));
+		refname = (char *) list_nth(es->rtable_names, rti - 1);
 
 		if (es->format == EXPLAIN_FORMAT_TEXT)
 		{
@@ -806,21 +804,31 @@ ExplainPrintBloat(ExplainState *es, Bitmapset *rels_used)
 				appendStringInfoString(es->str, "Bloat:\n");
 				es->indent++;
 			}
-			es->indent++;
+			ExplainIndentText(es);
+			if (nspname)
+				appendStringInfo(es->str, "%s.%s", quote_identifier(nspname), quote_identifier(relname));
+			else
+				appendStringInfo(es->str, "%s", quote_identifier(relname));
+
+			if (refname && strcmp(refname, relname) != 0)
+				appendStringInfo(es->str, " %s", quote_identifier(refname));
+
+			appendStringInfo(es->str, " live=" INT64_FORMAT " dead=" INT64_FORMAT "\n",
+							 livetuples, deadtuples);
 		}
 		else
+		{
 			ExplainOpenGroup("Relation", NULL, true, es);
-
-		ExplainPropertyText("Relation Name", qualified_relname, es);
-		ExplainPropertyInteger("Live Tuples", NULL, livetuples, es);
-		ExplainPropertyInteger("Dead Tuples", NULL, deadtuples, es);
-
-		if (es->format == EXPLAIN_FORMAT_TEXT)
-			es->indent--;
-		else
+			if (nspname)
+				ExplainPropertyText("Schema", nspname, es);
+			ExplainPropertyText("Relation Name", relname, es);
+			if (refname && strcmp(refname, relname) != 0)
+				ExplainPropertyText("Alias", refname, es);
+			ExplainPropertyInteger("Live Tuples", NULL, livetuples, es);
+			ExplainPropertyInteger("Dead Tuples", NULL, deadtuples, es);
 			ExplainCloseGroup("Relation", NULL, true, es);
+		}
 
-		pfree(qualified_relname);
 		printed = true;
 	}
 

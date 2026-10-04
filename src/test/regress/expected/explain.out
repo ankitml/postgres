@@ -396,7 +396,7 @@ select true as "OK"
 select explain_filter_to_json('explain (bloat, format json) select * from int8_tbl i8') #>> '{0,Bloat,0,Relation Name}';
     ?column?     
 -----------------
- public.int8_tbl
+ int8_tbl
 (1 row)
 
 -- GENERIC_PLAN option
