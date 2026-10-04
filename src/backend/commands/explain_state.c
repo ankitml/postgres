@@ -104,6 +104,8 @@ ParseExplainOptionList(ExplainState *es, List *options, ParseState *pstate)
 			es->wal = defGetBoolean(opt);
 		else if (strcmp(opt->defname, "settings") == 0)
 			es->settings = defGetBoolean(opt);
+		else if (strcmp(opt->defname, "bloat") == 0)
+			es->bloat = defGetBoolean(opt);
 		else if (strcmp(opt->defname, "generic_plan") == 0)
 			es->generic = defGetBoolean(opt);
 		else if (strcmp(opt->defname, "timing") == 0)

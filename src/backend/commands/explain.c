@@ -32,6 +32,7 @@
 #include "nodes/nodeFuncs.h"
 #include "parser/analyze.h"
 #include "parser/parsetree.h"
+#include "pgstat.h"
 #include "rewrite/rewriteHandler.h"
 #include "storage/bufmgr.h"
 #include "tcop/tcopprot.h"
@@ -71,6 +72,7 @@ static void ExplainPrintJIT(ExplainState *es, int jit_flags,
 							JitInstrumentation *ji);
 static void ExplainPrintSerialize(ExplainState *es,
 								  SerializeMetrics *metrics);
+static void ExplainPrintBloat(ExplainState *es, Bitmapset *rels_used);
 static void report_triggers(ResultRelInfo *rInfo, bool show_relname,
 							ExplainState *es);
 static double elapsed_time(instr_time *starttime);
@@ -753,6 +755,93 @@ ExplainPrintSettings(ExplainState *es)
 }
 
 /*
+ * ExplainPrintBloat -
+ *    Print live and dead tuple counts for relations referenced by the plan.
+ */
+static void
+ExplainPrintBloat(ExplainState *es, Bitmapset *rels_used)
+{
+	int			rti = -1;
+	bool		printed = false;
+
+	if (!es->bloat)
+		return;
+
+	if (es->format != EXPLAIN_FORMAT_TEXT)
+		ExplainOpenGroup("Bloat", "Bloat", false, es);
+
+	while ((rti = bms_next_member(rels_used, rti)) >= 0)
+	{
+		RangeTblEntry *rte;
+		PgStat_StatTabEntry *tabentry;
+		char	   *relname;
+		char	   *nspname = NULL;
+		char	   *refname;
+		int64		livetuples = 0;
+		int64		deadtuples = 0;
+
+		rte = rt_fetch(rti, es->rtable);
+		if (rte->rtekind != RTE_RELATION)
+			continue;
+
+		tabentry = pgstat_fetch_stat_tabentry(rte->relid);
+		if (tabentry != NULL)
+		{
+			livetuples = tabentry->live_tuples;
+			deadtuples = tabentry->dead_tuples;
+		}
+
+		relname = get_rel_name(rte->relid);
+		if (es->verbose || es->format != EXPLAIN_FORMAT_TEXT)
+			nspname = get_namespace_name_or_temp(get_rel_namespace(rte->relid));
+		refname = (char *) list_nth(es->rtable_names, rti - 1);
+
+		if (es->format == EXPLAIN_FORMAT_TEXT)
+		{
+			if (!printed)
+			{
+				ExplainIndentText(es);
+				appendStringInfoString(es->str, "Bloat:\n");
+				es->indent++;
+			}
+			ExplainIndentText(es);
+			if (nspname)
+				appendStringInfo(es->str, "%s.%s", quote_identifier(nspname), quote_identifier(relname));
+			else
+				appendStringInfo(es->str, "%s", quote_identifier(relname));
+
+			if (refname && strcmp(refname, relname) != 0)
+				appendStringInfo(es->str, " %s", quote_identifier(refname));
+
+			appendStringInfo(es->str, " live=" INT64_FORMAT " dead=" INT64_FORMAT "\n",
+							 livetuples, deadtuples);
+		}
+		else
+		{
+			ExplainOpenGroup("Relation", NULL, true, es);
+			if (nspname)
+				ExplainPropertyText("Schema", nspname, es);
+			ExplainPropertyText("Relation Name", relname, es);
+			if (refname && strcmp(refname, relname) != 0)
+				ExplainPropertyText("Alias", refname, es);
+			ExplainPropertyInteger("Live Tuples", NULL, livetuples, es);
+			ExplainPropertyInteger("Dead Tuples", NULL, deadtuples, es);
+			ExplainCloseGroup("Relation", NULL, true, es);
+		}
+
+		printed = true;
+	}
+
+	if (es->format == EXPLAIN_FORMAT_TEXT)
+	{
+		if (printed)
+			es->indent--;
+	}
+	else
+		ExplainCloseGroup("Bloat", "Bloat", false, es);
+}
+
+/*
  * ExplainPrintPlan -
  *	  convert a QueryDesc's plan tree to text and append it to es->str
  *
@@ -807,6 +896,9 @@ ExplainPrintPlan(ExplainState *es, QueryDesc *queryDesc)
 		es->hide_workers = true;
 	}
 	ExplainNode(ps, NIL, NULL, NULL, es);
+
+	/* If requested, include live and dead tuple counts for plan relations. */
+	ExplainPrintBloat(es, rels_used);
 
 	/*
 	 * If requested, include information about GUC parameters with values that

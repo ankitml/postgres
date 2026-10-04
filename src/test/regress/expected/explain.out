@@ -384,6 +384,21 @@ select explain_filter_to_json('explain (settings, format json) select * from int
 (1 row)
 
 rollback;
+-- BLOAT option
+select true as "OK"
+  from explain_filter('explain (bloat) select * from int8_tbl i8') ln
+  where ln = 'Bloat:';
+ OK 
+----
+ t
+(1 row)
+
+select explain_filter_to_json('explain (bloat, format json) select * from int8_tbl i8') #>> '{0,Bloat,0,Relation Name}';
+    ?column?     
+-----------------
+ int8_tbl
+(1 row)
+
 -- GENERIC_PLAN option
 select explain_filter('explain (generic_plan) select unique1 from tenk1 where thousand = $1');
                                  explain_filter                                  
